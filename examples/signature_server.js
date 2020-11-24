@@ -1,7 +1,7 @@
 var express = require('express');
 var cors = require('cors');
 var logger = require('loglevel');
-var signer = require('../src/main/signing');
+var signer = require('ztostor-sdk-js/dist/main/signing');
 
 logger.setLevel('debug');
 
