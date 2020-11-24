@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import axios from 'axios' 
 import fs from 'fs'
 import Crypto from 'crypto'
 import Http from 'http'
@@ -51,6 +52,34 @@ import { NotificationConfig, NotificationPoller } from './notification'
 import extensions from './extensions'
 
 var Package = require('../../package.json')
+
+class Request {
+  constructor(client, reqOptions) {
+    this.client = client;
+    this.reqOptions = reqOptions;
+  }
+  sign(region, date) {
+    var client = this.client
+    var reqOptions = this.reqOptions     
+    if (client.signature_server) {
+      if (!isString(client.signature_server)) {
+        throw new TypeError('signature_server should be of type "string"');
+      }
+      return axios({
+        url: client.signature_server,
+        method: 'POST',
+        data: reqOptions,
+      }).then((res) => {
+        this.reqOptions.headers.authorization = res.data
+        return this
+      });
+    }
+    var authorization = (0, _signing.signV4)(reqOptions, client.accessKey, client.secretKey, region, date);         
+    this.reqOptions.headers.authorization = authorization;
+    return Promise.resolve(this)
+    
+  }
+}
 
 export class Client {
   constructor(params) {
@@ -114,6 +143,8 @@ export class Client {
     var libraryAgent = `MinIO ${libraryComments} minio-js/${Package.version}`
     // User agent block ends.
 
+    var signature_server = params.signature_server
+    this.signature_server = signature_server
     this.transport = transport
     this.host = host
     this.port = port
@@ -125,7 +156,7 @@ export class Client {
 
     if (!this.accessKey) this.accessKey = ''
     if (!this.secretKey) this.secretKey = ''
-    this.anonymous = !this.accessKey || !this.secretKey
+    this.anonymous = (!this.accessKey || !this.secretKey) && !this.signature_server
 
     this.regionMap = {}
     if (params.region) {
@@ -401,47 +432,47 @@ export class Client {
       if (e) return cb(e)
       options.region = region
       var reqOptions = this.getRequestOptions(options)
+      let date = new Date()
       if (!this.anonymous) {
         // For non-anonymous https requests sha256sum is 'UNSIGNED-PAYLOAD' for signature calculation.
         if (!this.enableSHA256) sha256sum = 'UNSIGNED-PAYLOAD'
-
-        let date = new Date()
 
         reqOptions.headers['x-amz-date'] = makeDateLong(date)
         reqOptions.headers['x-amz-content-sha256'] = sha256sum
         if (this.sessionToken) {
           reqOptions.headers['x-amz-security-token'] = this.sessionToken
         }
-
-        var authorization = signV4(reqOptions, this.accessKey, this.secretKey, region, date)
-        reqOptions.headers.authorization = authorization
       }
-      var req = this.transport.request(reqOptions, response => {
-        if (statusCode !== response.statusCode) {
-          // For an incorrect region, S3 server always sends back 400.
-          // But we will do cache invalidation for all errors so that,
-          // in future, if AWS S3 decides to send a different status code or
-          // XML error code we will still work fine.
-          delete(this.regionMap[options.bucketName])
-          var errorTransformer = transformers.getErrorTransformer(response)
-          pipesetup(response, errorTransformer)
-            .on('error', e => {
-              this.logHTTP(reqOptions, response, e)
-              cb(e)
-            })
-          return
-        }
-        this.logHTTP(reqOptions, response)
-        if (returnResponse) return cb(null, response)
-        // We drain the socket so that the connection gets closed. Note that this
-        // is not expensive as the socket will not have any data.
-        response.on('data', ()=>{})
-        cb(null)
-      })
-      let pipe = pipesetup(stream, req)
-      pipe.on('error', e => {
-        this.logHTTP(reqOptions, null, e)
-        cb(e)
+      let signer = new Request(this, reqOptions)
+      signer.sign(region, date).then((signer) => {
+        reqOptions = signer.reqOptions
+        var req = this.transport.request(reqOptions, response => {
+          if (statusCode !== response.statusCode) {
+            // For an incorrect region, S3 server always sends back 400.
+            // But we will do cache invalidation for all errors so that,
+            // in future, if AWS S3 decides to send a different status code or
+            // XML error code we will still work fine.
+            delete(this.regionMap[options.bucketName])
+            var errorTransformer = transformers.getErrorTransformer(response)
+            pipesetup(response, errorTransformer)
+              .on('error', e => {
+                this.logHTTP(reqOptions, response, e)
+                cb(e)
+              })
+            return
+          }
+          this.logHTTP(reqOptions, response)
+          if (returnResponse) return cb(null, response)
+          // We drain the socket so that the connection gets closed. Note that this
+          // is not expensive as the socket will not have any data.
+          response.on('data', ()=>{})
+          cb(null)
+        })
+        let pipe = pipesetup(stream, req)
+        pipe.on('error', e => {
+          this.logHTTP(reqOptions, null, e)
+          cb(e)
+        })
       })
     }
     if (region) return _makeRequest(null, region)
