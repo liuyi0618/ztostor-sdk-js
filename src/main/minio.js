@@ -74,7 +74,7 @@ class Request {
         return this
       });
     }
-    var authorization = (0, _signing.signV4)(reqOptions, client.accessKey, client.secretKey, region, date);         
+    var authorization = signV4(reqOptions, client.accessKey, client.secretKey, region, date);         
     this.reqOptions.headers.authorization = authorization;
     return Promise.resolve(this)
     
