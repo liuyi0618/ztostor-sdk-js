@@ -17,7 +17,7 @@ npm install -g
 var S3Client = require('ztostor-sdk-js')
 
 var s3Client = new S3Client.Client({
-    endPoint: 'localhost',
+    endPoint: '<example.server.com>',
     port: 80,
     useSSL: false,
     accessKey: 'test',
@@ -31,7 +31,7 @@ var s3Client = new S3Client.Client({
 var S3Client = require('ztostor-sdk-js')
 
 var s3Client = new S3Client.Client({
-    endPoint: 'localhost',
+    endPoint: '<example.server.com>',
     port: 80,
     useSSL: false,
     signature_server: "<your.signserver.com>"
